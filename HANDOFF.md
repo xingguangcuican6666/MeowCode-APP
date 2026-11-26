@@ -80,3 +80,26 @@ The user (root) registered a dedicated public client, so the redirect decision i
 - `SimulatedOAuthTransport` stays as an explicit 「离线演示」 button for UI work offline.
 - `Device Code` flow: new-api implements only `authorization_code` and `refresh_token`
   (`controller/oauth_server.go`), so the device flow is not available.
+
+## 2026-11-26 · 产品聚合 + 公开仓库 + CI
+
+The app is now a **product-aggregation client** (the dashboard minus wallet top-up and the
+website): it asks for `apikeys.manage` and ships a key-manager screen.
+
+- Scope request is now `openid profile email groups wallet.read apikeys.manage
+  models.read models.invoke` (`MeowState.RequestedScopes`, `OAuthConfig.DEFAULT_SCOPE`).
+- `MeowApiClient` + 「我 → API 密钥」: list (`GET /oauth2/api/tokens`, PageInfo `data.items`),
+  create, reveal (`POST …/tokens/:id/key`, the only plaintext), delete. Dashboard envelope
+  `{success,message,data}` is unwrapped; `success:false` throws with the server message.
+- **Server-side requirement:** `apikeys.manage` is a sensitive scope. new-api checks the
+  client's **Trusted** flag (`pkg/oauthscope`, `ErrClientNotTrusted`) and answers 403
+  `insufficient_scope` otherwise — mark `cli_44cf45ec8ef543e49edede2e329836fe` trusted or
+  key management stays 403 even though the token carries the scope.
+- Memory snapshots copied to `docs/memory/`; license notes in `docs/licenses.md`.
+- Repository: public `github.com/xingguangcuican6666/MeowCode-APP`, GPL-3.0 (`LICENSE`).
+- `.github/workflows/android.yml`: on push/PR — unit tests, lint, assembleDebug, APK +
+  reports uploaded; on `v*` tags a **draft** release with the debug APK. Actions pinned to
+  node24-capable majors (checkout v5, setup-java v5, setup-gradle v5, upload-artifact v7,
+  download-artifact v8).
+- `.gitignore` lost a `data/` line that had swallowed `app/src/main/kotlin/.../data/` and
+  broke the first CI run; CI is green as of `82e601c`.
