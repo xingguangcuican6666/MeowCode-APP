@@ -18,6 +18,3 @@ captures/
 *.jks
 *.keystore
 .env
-
-# Local-only warehouse checkout used for reference (read-only mirror)
-data/
