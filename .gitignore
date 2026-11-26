@@ -1,0 +1,23 @@
+# Android / Gradle
+.gradle/
+.kotlin/
+build/
+local.properties
+captures/
+*.hprof
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Reference checkouts (read-only, not part of this project)
+.refs/
+
+# Secrets and signing material never belong in the tree
+*.jks
+*.keystore
+.env
+
+# Local-only warehouse checkout used for reference (read-only mirror)
+data/
