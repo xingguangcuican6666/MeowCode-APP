@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -32,8 +31,6 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import icu.xingguangcuican.meowcode.model.ApprovalBlock
@@ -54,7 +51,6 @@ import io.github.xingguangcuican6666.abk.ui.components.AbkBadge
 import io.github.xingguangcuican6666.abk.ui.components.AbkButton
 import io.github.xingguangcuican6666.abk.ui.components.AbkButtonStyle
 import io.github.xingguangcuican6666.abk.ui.components.AbkCard
-import io.github.xingguangcuican6666.abk.ui.components.AbkChip
 import io.github.xingguangcuican6666.abk.ui.components.AbkEmptyState
 import io.github.xingguangcuican6666.abk.ui.components.AbkIconButton
 import io.github.xingguangcuican6666.abk.ui.components.AbkInlineCode
@@ -81,11 +77,10 @@ fun ChatScreen(modifier: Modifier, snackbars: AbkSnackbarHostState) {
     }
 
     Column(modifier.fillMaxSize()) {
-        SessionStrip()
         Box(Modifier.weight(1f)) {
             if (meow.messages.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    AbkEmptyState("还没有对话", "输入一句你想让 MeowCode 做的事。", icon = AbkIcons.Edit)
+                    AbkEmptyState("还没有对话", "智能体接入后，这里会出现你和 MeowCode 的对话。", icon = AbkIcons.Edit)
                 }
             } else {
                 LazyColumn(
@@ -107,9 +102,9 @@ fun ChatScreen(modifier: Modifier, snackbars: AbkSnackbarHostState) {
                                     scope.launch {
                                         snackbars.show(
                                             when (state) {
-                                                ApprovalState.Allowed -> "本次已允许（模拟）"
-                                                ApprovalState.AlwaysAllowed -> "该项目内总是允许（模拟）"
-                                                else -> "已拒绝（模拟）"
+                                                ApprovalState.Allowed -> "本次已允许"
+                                                ApprovalState.AlwaysAllowed -> "该项目内总是允许"
+                                                else -> "已拒绝"
                                             },
                                             if (state == ApprovalState.Denied) AbkTone.Warning else AbkTone.Success,
                                         )
@@ -120,27 +115,10 @@ fun ChatScreen(modifier: Modifier, snackbars: AbkSnackbarHostState) {
                             is SystemNotice -> NoticeCard(block)
                         }
                     }
-                    item("tail") { SampleFooter() }
                 }
             }
         }
         Composer()
-    }
-}
-
-@Composable
-private fun SessionStrip() {
-    val meow = LocalMeow.current
-    Column(Modifier.fillMaxWidth().padding(horizontal = AbkSpacing.Lg, vertical = AbkSpacing.Sm)) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(AbkSpacing.Sm)) {
-            items(meow.sessions, key = { it.id }) { session ->
-                AbkChip(
-                    label = if (session.running) "● ${session.title}" else session.title,
-                    selected = session.id == meow.activeSessionId,
-                    onSelectedChange = { meow.activeSessionId = session.id },
-                )
-            }
-        }
     }
 }
 
@@ -180,7 +158,7 @@ private fun AssistantBlock(message: AssistantMessage) {
 
 /**
  * Minimal inline formatter: `code` spans go to the mono family, paragraphs get
- * spacing. Deliberately not a Markdown engine — the stub should not pretend to be one.
+ * spacing. Deliberately not a Markdown engine.
  */
 @Composable
 private fun RichText(text: String) {
@@ -354,25 +332,15 @@ private fun NoticeCard(notice: SystemNotice) {
 }
 
 @Composable
-private fun SampleFooter() {
-    Row(Modifier.fillMaxWidth().padding(top = AbkSpacing.Sm), horizontalArrangement = Arrangement.Center) {
-        AbkText("— 示例对话结束 —", style = MaterialTheme.typography.labelSmall, color = AbkTheme.colors.inkFaint)
-    }
-}
-
-@Composable
 private fun Composer() {
     val meow = LocalMeow.current
-    val windowInfo = LocalWindowInfo.current
-    val density = LocalDensity.current
-    val tight = with(density) { windowInfo.containerSize.width.toDp() } < 360.dp
     Column(Modifier.fillMaxWidth().padding(horizontal = AbkSpacing.Md, vertical = AbkSpacing.Sm)) {
         AbkTextField(
             value = meow.composerText,
             onValueChange = { meow.composerText = it },
             label = "消息",
             modifier = Modifier.fillMaxWidth(),
-            placeholder = "描述你的任务，例如：修复 OAuth 刷新竞态",
+            placeholder = "描述你的任务",
             singleLine = false,
             minLines = 1,
             maxLines = 5,
@@ -381,14 +349,7 @@ private fun Composer() {
         )
         Spacer(Modifier.height(AbkSpacing.Xs))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AbkSpacing.Xs)) {
-            if (!tight) {
-                AbkChip("@ 文件", selected = false, onSelectedChange = {}, icon = AbkIcons.Plus)
-                AbkChip("计划模式", selected = false, onSelectedChange = {}, icon = AbkIcons.Controls)
-            }
             Spacer(Modifier.weight(1f))
-            if (meow.isThinking) {
-                AbkButton(meow::stopReply, style = AbkButtonStyle.Outline, size = AbkSize.Small) { Text("停止") }
-            }
             AbkButton(
                 { meow.sendMessage() },
                 style = AbkButtonStyle.Primary,

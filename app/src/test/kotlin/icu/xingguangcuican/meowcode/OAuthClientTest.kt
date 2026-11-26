@@ -9,8 +9,8 @@ import icu.xingguangcuican.meowcode.data.oauth.queryParameters
 import icu.xingguangcuican.meowcode.data.oauth.MeowOAuthClient
 import icu.xingguangcuican.meowcode.data.oauth.OAuthConfig
 import icu.xingguangcuican.meowcode.data.oauth.PkcePair
-import icu.xingguangcuican.meowcode.data.oauth.SimulatedOAuthTransport
-import icu.xingguangcuican.meowcode.data.oauth.SimulatedOutcome
+import icu.xingguangcuican.meowcode.data.oauth.AuthorizationResult
+import icu.xingguangcuican.meowcode.data.oauth.OAuthTransport
 import icu.xingguangcuican.meowcode.data.oauth.TokenResponse
 import icu.xingguangcuican.meowcode.data.oauth.buildAuthorizationUrl
 import icu.xingguangcuican.meowcode.data.oauth.parseAuthorizationRedirect
@@ -26,7 +26,7 @@ import java.util.Base64
 /**
  * Contract checks for the OAuth client. These run on the JVM without Android: the
  * pure parts of the flow (PKCE, URL shape, state validation, token lifecycle) are
- * exercised against the same simulated transport the stub UI uses.
+ * exercised against a recording fake, never against the real browser transport.
  */
 class OAuthClientTest {
     private val config = OAuthConfig(issuer = "https://example.test")
@@ -59,47 +59,53 @@ class OAuthClientTest {
     }
 
     @Test
-    fun `successful simulated login produces a session bound to the config`() {
-        val transport = SimulatedOAuthTransport(delayMs = 0, sleep = {})
+    fun `successful login produces a session bound to the config`() {
+        val transport = FakeTransport()
         val client = MeowOAuthClient(config, transport)
         val request: AuthorizationRequest = client.beginAuthorization()
         val redirect = "${config.redirectUri}?code=abc&state=${request.state}"
         val session = client.completeAuthorization(redirect).getOrThrow()
         assertEquals(config.issuer, session.issuer)
-        assertTrue(session.accessToken.startsWith("sim_at_"))
-        assertNotNull(session.refreshToken)
+        assertEquals("at_test", session.accessToken)
+        assertEquals("rt_test", session.refreshToken)
         assertTrue(session.isFresh())
+        // The verifier sent to the token endpoint is the one behind the URL's challenge.
+        assertEquals(request.pair.verifier, transport.lastForm?.get("code_verifier"))
+        assertEquals("abc", transport.lastForm?.get("code"))
         // A second completion after success has no pending request.
         assertTrue(client.completeAuthorization(redirect).isFailure)
     }
 
     @Test
     fun `state mismatch is rejected before any token exchange`() {
-        var exchangeCalls = 0
-        val transport = SimulatedOAuthTransport(delayMs = 0, sleep = {})
-        val client = MeowOAuthClient(config, object : icu.xingguangcuican.meowcode.data.oauth.OAuthTransport by transport {
-            override fun postForm(url: String, form: Map<String, String>): String {
-                exchangeCalls++
-                return transport.postForm(url, form)
-            }
-        })
+        val transport = FakeTransport()
+        val client = MeowOAuthClient(config, transport)
         val request = client.beginAuthorization()
         val result = client.completeAuthorization("${config.redirectUri}?code=abc&state=forged")
         assertTrue(result.isFailure)
         assertTrue(result.exceptionOrNull()!!.message!!.contains("state"))
-        assertEquals(0, exchangeCalls)
+        assertEquals(0, transport.postFormCalls)
         assertNull(client.currentSession())
         assertNotNull(request)
     }
 
     @Test
     fun `denied authorization surfaces the server description`() {
-        val transport = SimulatedOAuthTransport(SimulatedOutcome.Denied, delayMs = 0, sleep = {})
+        val transport = FakeTransport(
+            authorizeResult = AuthorizationResult(null, "s", "access_denied", "用户拒绝了授权"),
+        )
         val client = MeowOAuthClient(config, transport)
         val request = client.beginAuthorization()
-        val result = transport.authorizeSync(request.url)
+        val result = kotlinx.coroutines.runBlocking { transport.authorize(config, request.url) }
         assertEquals("access_denied", result.error)
         assertFalse(result.errorDescription.isNullOrBlank())
+        // A redirect that only carries the error must not reach the token endpoint either.
+        val completed = client.completeAuthorization(
+            "${config.redirectUri}?error=access_denied&error_description=用户拒绝了授权&state=${request.state}",
+        )
+        assertTrue(completed.isFailure)
+        assertEquals("用户拒绝了授权", completed.exceptionOrNull()!!.message)
+        assertEquals(0, transport.postFormCalls)
     }
 
     @Test
@@ -165,17 +171,35 @@ class OAuthClientTest {
         assertTrue(config.authorizationEndpoint.startsWith("https://"))
     }
 
-    @Test
-    fun `simulated transport only echoes the state it was given`() {
-        // The simulator must not invent a code for a URL it does not understand.
-        val transport = SimulatedOAuthTransport(delayMs = 0, sleep = {})
-        val result = kotlinx.coroutines.runBlocking { transport.authorize(config, "https://example.test/oauth2/authorize?state=abc") }
-        assertEquals("abc", result.state)
-        assertEquals("sim_code", result.code)
-        val stateless = kotlinx.coroutines.runBlocking { transport.authorize(config, "not a url") }
-        assertNull(stateless.state)
-    }
+    /** Records what the client sends and answers with a fixed token payload. */
+    private class FakeTransport(
+        private val authorizeResult: AuthorizationResult = AuthorizationResult("code", "s", null, null),
+    ) : OAuthTransport {
+        override val label: String = "测试"
+        var postFormCalls = 0
+            private set
+        var lastForm: Map<String, String>? = null
+            private set
 
-    private fun SimulatedOAuthTransport.authorizeSync(url: String): icu.xingguangcuican.meowcode.data.oauth.AuthorizationResult =
-        kotlinx.coroutines.runBlocking { authorize(config, url) }
+        override suspend fun authorize(config: OAuthConfig, authorizationUrl: String): AuthorizationResult = authorizeResult
+
+        override fun postForm(url: String, form: Map<String, String>): String {
+            postFormCalls++
+            lastForm = form
+            return if (form["grant_type"] == "refresh_token") {
+                """{"access_token":"at_rotated","refresh_token":"rt_rotated","expires_in":3600}"""
+            } else {
+                """{"access_token":"at_test","refresh_token":"rt_test","token_type":"Bearer","expires_in":3600}"""
+            }
+        }
+
+        override fun getBearer(url: String, accessToken: String): String =
+            """{"sub":"7","preferred_username":"meow"}"""
+
+        override fun postJson(url: String, accessToken: String, body: String): String = error("unused")
+
+        override fun deleteBearer(url: String, accessToken: String): String = error("unused")
+
+        override fun cancel() = Unit
+    }
 }

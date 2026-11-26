@@ -33,7 +33,6 @@ import io.github.xingguangcuican6666.abk.ui.components.AbkBadge
 import io.github.xingguangcuican6666.abk.ui.components.AbkButton
 import io.github.xingguangcuican6666.abk.ui.components.AbkButtonStyle
 import io.github.xingguangcuican6666.abk.ui.components.AbkCard
-import io.github.xingguangcuican6666.abk.ui.components.AbkChip
 import io.github.xingguangcuican6666.abk.ui.components.AbkEmptyState
 import io.github.xingguangcuican6666.abk.ui.components.AbkIconButton
 import io.github.xingguangcuican6666.abk.ui.components.AbkSize
@@ -68,11 +67,11 @@ fun TerminalScreen(modifier: Modifier, snackbars: AbkSnackbarHostState) {
             horizontalArrangement = Arrangement.spacedBy(AbkSpacing.Sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AbkText("模拟终端", style = MaterialTheme.typography.titleSmall, color = AbkTheme.colors.ink)
-            AbkBadge("本地模拟", tone = AbkTone.Info)
+            AbkText("终端", style = MaterialTheme.typography.titleSmall, color = AbkTheme.colors.ink)
+            AbkBadge("未接入运行时", tone = AbkTone.Neutral)
             Spacer(Modifier.weight(1f))
             AbkButton(
-                { meow.clearTerminal(); scope.launch { snackbars.show("已清空本地命令卡片（模拟）") } },
+                { meow.clearTerminal(); scope.launch { snackbars.show("已清空命令卡片") } },
                 style = AbkButtonStyle.Ghost,
                 size = AbkSize.Small,
                 enabled = meow.terminal.isNotEmpty(),
@@ -82,7 +81,7 @@ fun TerminalScreen(modifier: Modifier, snackbars: AbkSnackbarHostState) {
         Box(Modifier.weight(1f)) {
             if (meow.terminal.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    AbkEmptyState("没有命令", "在下方输入 help 查看可用的演示命令。", icon = AbkIcons.Terminal)
+                    AbkEmptyState("没有命令", "Termux 运行时桥接接入后才能提交命令。", icon = AbkIcons.Terminal)
                 }
             } else {
                 LazyColumn(
@@ -94,7 +93,7 @@ fun TerminalScreen(modifier: Modifier, snackbars: AbkSnackbarHostState) {
                     items(meow.terminal, key = { it.id }) { card -> CommandCard(card, { meow.toggleCommandCard(card.id) }) }
                     item {
                         AbkText(
-                            "输出来自应用内置的 MockShell；没有启动 Termux，也没有运行真实进程。",
+                            "命令只会记录成卡片，不会提交到任何进程——终端桥接尚未接入。",
                             style = MaterialTheme.typography.labelSmall,
                             color = AbkTheme.colors.inkFaint,
                             modifier = Modifier.padding(vertical = AbkSpacing.Sm),
@@ -148,25 +147,19 @@ private fun CommandCard(card: TerminalCommand, onToggle: () -> Unit) {
 private fun TerminalComposer() {
     val meow = LocalMeow.current
     Column(Modifier.fillMaxWidth().padding(horizontal = AbkSpacing.Md, vertical = AbkSpacing.Sm)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(AbkSpacing.Xs)) {
-            listOf("git status --short", "npm run typecheck", "help").forEach { preset ->
-                AbkChip(preset, selected = false, onSelectedChange = { meow.submitCommand(preset) }, enabled = true)
-            }
-        }
-        Spacer(Modifier.size(AbkSpacing.Xs))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AbkSpacing.Sm)) {
             AbkTextField(
                 value = meow.terminalDraft,
                 onValueChange = { meow.terminalDraft = it },
                 label = "命令",
                 modifier = Modifier.weight(1f),
-                placeholder = "输入命令（本地模拟）",
+                placeholder = "输入命令",
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send, capitalization = KeyboardCapitalization.None, autoCorrect = false),
                 keyboardActions = KeyboardActions(onSend = { meow.submitCommand() }),
                 prefix = { Text("$", fontFamily = AbkTheme.monoFont, color = AbkTheme.colors.inkMuted) },
             )
             AbkButton({ meow.submitCommand() }, style = AbkButtonStyle.Primary, enabled = meow.terminalDraft.isNotBlank()) {
-                Text("运行")
+                Text("记录")
             }
         }
     }

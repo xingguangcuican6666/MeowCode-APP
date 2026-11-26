@@ -18,7 +18,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import icu.xingguangcuican.meowcode.data.oauth.SimulatedOutcome
 import icu.xingguangcuican.meowcode.ui.state.LocalMeow
 import icu.xingguangcuican.meowcode.ui.state.LoginPhase
 import io.github.xingguangcuican6666.abk.ui.components.AbkAlert
@@ -77,12 +76,12 @@ fun MeScreen(modifier: Modifier, snackbars: AbkSnackbarHostState, onOpenSettings
         item("about") {
             AbkCard(Modifier.fillMaxWidth()) {
                 AbkText("关于", style = MaterialTheme.typography.titleSmall)
-                AbkKeyValue("版本", "0.1.0 · stub")
+                AbkKeyValue("版本", "0.1.0")
                 AbkKeyValue("设计规范", "ABK UI（Lucide · 等权导航 · 系统字体）")
                 AbkKeyValue("运行时", "Termux 提供环境，应用本身为原生 Compose")
                 AbkDivider()
                 AbkText(
-                    "登录已连接真实 MeowAPI；对话、命令、文件与环境仍是本地示例，不会执行命令或读取设备文件。",
+                    "登录已连接真实 MeowAPI；智能体、终端、文件与环境访问尚未接入，应用不会执行命令或读取设备文件。",
                     style = MaterialTheme.typography.bodySmall,
                     color = AbkTheme.colors.inkMuted,
                 )
@@ -92,10 +91,9 @@ fun MeScreen(modifier: Modifier, snackbars: AbkSnackbarHostState, onOpenSettings
             if (meow.session != null) {
                 AbkButton(
                     {
-                        val wasSimulated = meow.account.simulated
                         meow.signOut()
                         scope.launch {
-                            snackbars.show(if (wasSimulated) "已退出离线演示" else "已退出登录，令牌已吊销", AbkTone.Neutral)
+                            snackbars.show("已退出登录，令牌已吊销", AbkTone.Neutral)
                             Unit
                         }
                     },
@@ -166,21 +164,6 @@ private fun SignInCard(snackbars: AbkSnackbarHostState) {
                     Modifier.fillMaxWidth(),
                     style = AbkButtonStyle.Primary,
                 ) { AbkIcon(AbkIcons.ArrowRight, null); Spacer(Modifier.width(6.dp)); Text("使用 MeowAPI 登录") }
-                AbkButton({ meow.startSimulatedLogin() }, Modifier.fillMaxWidth(), style = AbkButtonStyle.Outline) {
-                    Text("离线演示（模拟令牌）")
-                }
-                AbkText("模拟结果", style = MaterialTheme.typography.labelMedium, color = AbkTheme.colors.inkSoft)
-                AbkSelect(
-                    options = SimulatedOutcome.entries.map { AbkOption(it.name, it.label) },
-                    selectedId = meow.simulatedOutcome.name,
-                    onSelect = { meow.chooseSimulatedOutcome(SimulatedOutcome.valueOf(it)) },
-                    label = "离线演示结果",
-                )
-                AbkAlert(
-                    "离线演示",
-                    "「离线演示」不会打开浏览器，也不会访问网络；令牌以 sim_ 前缀生成，仅在本次运行中有效。",
-                    tone = AbkTone.Info,
-                )
             }
         }
     }
@@ -200,7 +183,7 @@ private fun SignedInCard(snackbars: AbkSnackbarHostState) {
                     AbkText("@$it", style = MaterialTheme.typography.bodySmall, color = AbkTheme.colors.inkMuted)
                 }
             }
-            AbkBadge(account.source.label, tone = if (account.simulated) AbkTone.Info else AbkTone.Success, dot = !account.simulated)
+            AbkBadge("MeowAPI", tone = AbkTone.Success, dot = true)
         }
         AbkDivider()
         Row(horizontalArrangement = Arrangement.spacedBy(AbkSpacing.Xl)) {

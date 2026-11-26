@@ -48,8 +48,7 @@ No backend, real model calls, PTY, file access, or real OAuth requests in this s
 MeowCode CLI registers `http://127.0.0.1:8788/callback`. That loopback callback is not
 appropriate for Android browser OAuth. The Android app needs a **custom URI scheme** or
 verified app link registered exactly against the public OAuth client. Do not fabricate
-or register a new callback unilaterally. The stub's simulated OAuth exists so the UI
-can be built before the redirect contract is approved.
+or register a new callback unilaterally.
 
 ## 2026-11-26 · stub milestone reached
 
@@ -77,7 +76,6 @@ The user (root) registered a dedicated public client, so the redirect decision i
   stays single-flight and the rotated token is persisted inside the lock.
 - `SessionStore` seals the session with an AES-GCM key in the Android Keystore; theme
   override is the only other persisted preference. Loss of the keystore key = re-login.
-- `SimulatedOAuthTransport` stays as an explicit 「离线演示」 button for UI work offline.
 - `Device Code` flow: new-api implements only `authorization_code` and `refresh_token`
   (`controller/oauth_server.go`), so the device flow is not available.
 
@@ -103,3 +101,41 @@ website): it asks for `apikeys.manage` and ships a key-manager screen.
   download-artifact v8).
 - `.gitignore` lost a `data/` line that had swallowed `app/src/main/kotlin/.../data/` and
   broke the first CI run; CI is green as of `82e601c`.
+
+## 2026-11-26 · 移除离线演示
+
+- 删除了 `SimulatedOAuthTransport` / `SimulatedOutcome`、「我 → 离线演示」按钮、模拟结果
+  选择器和 `AccountSource`（「模拟会话」徽标）。登录只剩真实 MeowAPI OAuth。
+- `MeowState` 现在用 `browserTransport ?: UnavailableTransport` 构造客户端；后者只会返回
+  `browser_unavailable` 或抛 `IOException`，不会产生任何会话。
+- `OAuthClientTest` 改用文件内的 `FakeTransport`，不再依赖已删除的模拟器。
+
+## 2026-11-26 · 底部栏改为侧边导航
+
+- 导航从等权底部栏换成 `AbkNavigationDrawer`：窄屏（<840dp）为带 scrim 的滑出抽屉，
+  宽屏常驻侧栏。抽屉顶部是品牌块、MeowAPI 登录状态与当前工作区，底部是「设置」与版本行。
+- 组件先加在设计仓库（`028554e`），再 vendor 到 `:abk-ui`；`abk-ui` 因此多了
+  `api(libs.activity.compose)`（预测式返回关闭抽屉）。
+- 修复（设计仓库 `828c60b`）：抽屉在 LTR 下从右侧滑入（先「抽搐」到最右、再只偏移半屏），
+  因为 `slideInHorizontally` 的起点按布局方向取负值；现由 `offScreen` 按 RTL 镜像。
+  行标签统一 `labelMedium`（与 Web `.toc__link` 的 `--fs-sm` 一致），选中行用
+  accent 填充 + `accent.onContainer` 前景，并补了按下态。
+
+## 2026-11-26 · 移除应用内全部示例内容
+
+- 删除 `data/MockData.kt`（示例文件树、OAuth 文件差异、示例账号）与 `MeowState` 里的
+  `MockShell`、示例工作区/会话/环境、`isThinking`/`stopReply`、`selectedFilePath`/
+  `fileSearch`、`checkEnvironment`/`installEnvironmentItem` 以及模拟运行命令的协程。
+- 列表全部从空开始：会话、终端、文件、工作区、运行时环境都由未来的传输层填充，未接入时
+  显示空状态并写明「未接入」。`WorkspaceOrigin.Demo` 一并删除。
+- 发送消息与提交命令不再伪造结果：消息会留在本地并提示「尚未连接智能体」，命令只记成
+  `Pending` 卡片并注明没有提交到任何进程。
+- 删除随之失效的模型：`Conversation`、`RepoFile`、`FileTreeNode`/`NodeKind`。
+- UI 文案去掉「stub / 模拟 / 示例」：终端页徽标改为「未接入运行时」，清空提示、
+  空态、页脚、`subtitleFor` 与「我 → 关于」都改为如实说明。
+
+## 2026-11-26 · 回归修复：退出后重新登录失败
+
+- 回归修复（同一提交）：退出登录后再登录失败是因为 `BrowserOAuthTransport` 复用了已完成的
+  `CompletableDeferred`；现在每次登录由 `CallbackSlot.begin()` 开启新尝试，回调只唤醒 state
+  匹配的那一次（见 `CallbackSlotTest`）。

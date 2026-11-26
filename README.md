@@ -12,7 +12,7 @@ Android 客户端：把 [MeowCode](https://github.com/xingguangcuican6666/MeowCo
 | 登录 MeowAPI（OAuth 2.0 + PKCE，系统浏览器回跳） | ✅ 真实接入，令牌用 Android Keystore 加密保存 |
 | 账号信息、余额 | ✅ 真实 `/oauth2/userinfo`、`/oauth2/api/wallet` |
 | API 密钥管理（apikeys.manage） | ✅ 列表 / 显示 / 新建 / 删除 |
-| 对话、终端命令、文件、工作区、模型目录 | ⚠️ 本地示例数据，界面已标注「示例 / 模拟 / 未连接」 |
+| 对话、终端命令、文件、工作区、模型目录 | ⚠️ 尚未接入智能体；页面为空状态并标注「未接入」 |
 | 智能体运行时（Termux + Node.js + MeowCode CLI） | ⏳ 下一步 |
 
 **Termux 只提供运行环境**（Node.js、git、工作树）。应用本身是原生 Android 应用，
@@ -45,18 +45,19 @@ export ANDROID_HOME=/path/to/android-sdk
 - `at_` 访问令牌本身即可调用模型接口；refresh token 会轮换，因此刷新是单飞的，
   并在锁内立即落盘。
 
-「我 → 离线演示」走同一套 PKCE/state 校验，但浏览器与 HTTP 由本地模拟器代替，
-令牌带 `sim_` 前缀，仅用于离线开发界面。
+登录只有一条路径：系统浏览器里的 MeowAPI 授权页。应用内不输入密码，也没有离线或
+模拟登录——任何令牌都只能来自真实的授权码交换。
 
 ## 结构
 
 ```
 :abk-ui   vendored ABK 设计系统（见 docs/vendoring.md）
-:app      导航、页面、示例数据、OAuth 客户端、主题
+:app      导航（侧边栏 / 抽屉）、页面、OAuth 客户端、主题
 ```
 
-- 状态集中在 `ui/state/MeowState.kt`，通过 `CompositionLocal` 下发。
-- 示例数据在 `data/MockData.kt`。
+- 状态集中在 `ui/state/MeowState.kt`，通过 `CompositionLocal` 下发。工作区、会话、
+  命令、环境列表都由未来的传输层填充，应用不自带样例数据。
+- 应用不携带任何示例内容：没有接入的部分显示空状态与「未接入」说明。
 - OAuth 在 `data/oauth/`；真实浏览器回跳是 `BrowserOAuthTransport`。
 - 设计规则、命令与约定见 [CLAUDE.md](CLAUDE.md)；进度记录见 [HANDOFF.md](HANDOFF.md)。
 

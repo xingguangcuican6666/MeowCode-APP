@@ -21,4 +21,6 @@ dependencies {
     api(libs.compose.ui)
     api(libs.compose.foundation)
     api(libs.compose.material3)
+    // AbkNavigationDrawer's predictive-back dismiss (same as upstream).
+    api(libs.activity.compose)
 }

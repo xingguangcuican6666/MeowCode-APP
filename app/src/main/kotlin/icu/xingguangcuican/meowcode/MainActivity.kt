@@ -20,15 +20,20 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // A single app-scoped coroutine scope stands in for a ViewModel in the stub.
+        // A single app-scoped coroutine scope stands in for a ViewModel.
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         state = MeowState(
             scope = scope,
             browserTransport = BrowserOAuthTransport(this),
             store = SessionStore(this),
         )
-        // Cold start straight from the consent page (the process was killed in the browser).
+        // Cold start straight from the consent page (the activity was recreated in the
+        // browser). MeowState is new here, so there is no pending request any more —
+        // that is the state handleOAuthCallback reports as "log in again".
         intent?.dataString?.let(::deliverCallback)
+        // Consume it: a rotation recreates the activity with the same intent, and the
+        // code must not be replayed from it.
+        setIntent(null)
         setContent { MeowApp(state) }
     }
 

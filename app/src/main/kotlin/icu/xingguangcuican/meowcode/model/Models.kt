@@ -1,9 +1,8 @@
 package icu.xingguangcuican.meowcode.model
 
-/** Everything the stub shows. Mirrors MeowCode's agent events without claiming a backend. */
+/** Shapes the agent transport will emit. Nothing here is populated until it is wired. */
 
 enum class WorkspaceOrigin(val label: String) {
-    Demo("示例工作区"),
     Imported("已导入"),
     Termux("Termux 目录"),
 }
@@ -103,12 +102,6 @@ data class SessionSummary(
     val running: Boolean = false,
 )
 
-data class Conversation(
-    val sessionId: String,
-    val blocks: List<ChatBlock>,
-    val streaming: Boolean = false,
-)
-
 /** Terminal destination model: one submitted command per card. */
 data class TerminalCommand(
     val id: String,
@@ -121,17 +114,6 @@ data class TerminalCommand(
     val expanded: Boolean = true,
 )
 
-/** Workspace file explorer. */
-data class RepoFile(
-    val path: String,
-    val sizeLabel: String,
-    val changed: Boolean = false,
-    val language: String = "",
-)
-
-data class FileTreeNode(val name: String, val path: String, val kind: NodeKind, val children: List<FileTreeNode> = emptyList())
-enum class NodeKind { Directory, File }
-
 /** Termux environment checklist for the Workspaces destination. */
 enum class EnvState(val label: String) { Checking("检测中"), Missing("未安装"), Blocked("需授权"), Ready("已就绪"), Failed("失败") }
 
@@ -143,12 +125,7 @@ data class EnvironmentItem(
     val detail: String? = null,
 )
 
-/** MeowAPI account state. */
-enum class AccountSource(val label: String) {
-    Mock("模拟会话"),
-    Live("MeowAPI"),
-}
-
+/** MeowAPI account state. Always a real MeowAPI session; there is no offline mode. */
 data class Account(
     val signedIn: Boolean,
     val username: String? = null,
@@ -159,10 +136,7 @@ data class Account(
     val quotaLabel: String? = null,
     val usedLabel: String? = null,
     val tokenExpiresAt: String? = null,
-    val source: AccountSource = AccountSource.Mock,
-) {
-    val simulated: Boolean get() = source == AccountSource.Mock
-}
+)
 
 /** Theme + preference owned by the host (never persisted by the library). */
 data class AppPreferences(

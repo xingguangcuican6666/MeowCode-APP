@@ -1,8 +1,13 @@
 # Vendoring notes
 
-`:abk-ui` is copied from `../rebuild_abk_design/abk-ui` (commit
-`d3b86db0d1b49d81e03dafc04005502f87007d52`, 2026-11-23). No upstream files were
-modified.
+`:abk-ui` is copied from `../rebuild_abk_design/abk-ui` (base commit
+`d3b86db0d1b49d81e03dafc04005502f87007d52`, 2026-11-23), plus one later upstream
+commit: `028554e` (2026-11-26) adds
+`components/AbkNavigationDrawer.kt` — the side navigation (modal drawer or permanent
+rail) — and `api(libs.activity.compose)` for its predictive-back dismiss; `828c60b`
+(2026-11-26) fixes its slide-in edge and row styling (start-edge direction for LTR/RTL,
+`labelMedium` rows, accent-fill selection). The vendored copy of that file is
+byte-identical to upstream.
 
 ## Intentional app-specific deltas
 

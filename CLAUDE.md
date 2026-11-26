@@ -10,10 +10,12 @@ and presents it as an **AI-chat UI** — message cards, tool cards, permission c
 rather than a terminal emulator. There is a terminal destination, but it is card-ised
 too.
 
-The current milestone is a **stub app**: a complete UI shell with deterministic, local
-sample data. Nothing here talks to a real agent, a real shell, or a real OAuth server.
-Every screen must say so in the UI (「示例」/「未连接」/「模拟」) until the real
-transport lands.
+The current milestone is a **chat shell with no sample content**: the full UI (side
+navigation, five destinations, login) is in place, and every list that the agent would
+fill (workspaces, sessions, messages, commands, environment, files) starts empty and
+shows an empty state saying it is not connected yet (「未接入」). Login is real; nothing
+talks to the agent transport, a shell, or the file system. Never add mock/sample rows or
+simulated output back — an unwired surface says so instead.
 
 Termux is **only the runtime environment** for the agent (Node.js, git, the working
 tree). The app is a normal native Android app; it is not launched inside Termux and is
@@ -24,10 +26,10 @@ not a terminal-emulator front end for it.
 - `:abk-ui` — a **vendored snapshot** of the ABK design system library from
   `../rebuild_abk_design` (commit `d3b86db`, 2026-11-23). Visual language, tokens,
   icons and components live there and must not be forked inside `:app`.
-- `:app` — the MeowCode app: navigation, screens, mock data, OAuth client, theme.
+- `:app` — the MeowCode app: navigation, screens, OAuth client, theme.
 
 `:abk-ui` and `:app` are both released under GPL-3.0 (see `LICENSE`, `docs/licenses.md`).
-Login is real (MeowAPI OAuth); everything the agent would do is still mock data.
+Login is real (MeowAPI OAuth); everything the agent would do is still unwired.
 
 Vendoring changes (see `docs/vendoring.md`): fonts use the system default
 (`AbkFonts.Hand`/`Mono` → `FontFamily.Default`/`Monospace`), the 47 MB Yozai/WenKai
@@ -54,7 +56,8 @@ compiler 2.2.21, Compose BOM 2025.11.01, `compileSdk`/`targetSdk` 36, `minSdk` 2
 ## Design rules (from the ABK standard)
 
 - Lucide only, the 30 semantic roles in `AbkIcons`; directional icons mirror for RTL.
-- Equal-weight bottom destinations — selection changes no icon, size, colour or hit box.
+- Equal-weight destinations — selection changes the row's surface (the web
+  `.toc__link.is-active` accent fill), never its icon, size or hit box.
 - ≥48dp touch targets; visible focus; status is never colour-only (icon + text + colour).
 - External, undecorated field labels; errors carry a text message and semantics.
 - Build/chat cards use ordinary surfaces; tone colours stay on status and progress.
@@ -62,16 +65,18 @@ compiler 2.2.21, Compose BOM 2025.11.01, `compileSdk`/`targetSdk` 36, `minSdk` 2
 
 ## App conventions
 
-- Five tabs, equal weight: **会话 / 终端 / 文件 / 工作区 / 我**.
+- Five destinations, equal weight: **会话 / 终端 / 文件 / 工作区 / 我**, reached through
+  `AbkNavigationDrawer`: a slide-out modal below 840dp, a permanent side bar at or above
+  it. There is no bottom bar.
 - State lives in `MeowState` (`ui/state/`), exposed through a `CompositionLocal`.
   Screens are stateless composables taking data + callbacks wherever practical.
-- Mock data is deterministic and lives in `data/mock/`. Do not embed copy strings in
-  composables when they belong to the sample session.
-- Every mock surface carries an explicit label; do not present simulated output as real
-  tool execution.
-- The OAuth client (`data/oauth/`) implements the real PKCE contract but the actual
-  browser round-trip is behind `OAuthTransport`; the stub uses
-  `SimulatedOAuthTransport`. It never fabricates tokens outside the simulator.
+- The app ships **no sample data**. Lists the agent transport will fill start empty and
+  render an empty state that says the surface is not connected; do not fabricate rows,
+  streaming replies or command output to make a screen look full.
+- The OAuth client (`data/oauth/`) implements the real PKCE contract; the browser
+  round-trip is `BrowserOAuthTransport` and callback routing is `CallbackSlot`. There is
+  no simulated/offline login — never reintroduce one; tokens only come from a real code
+  exchange.
 - New strings are Chinese by default (the product language); keep technical terms in
   their original spelling.
 

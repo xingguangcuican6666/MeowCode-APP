@@ -6,7 +6,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import icu.xingguangcuican.meowcode.data.MockData
 import androidx.compose.runtime.mutableStateMapOf
 import icu.xingguangcuican.meowcode.data.oauth.ApiKey
 import icu.xingguangcuican.meowcode.data.oauth.AuthorizationRequest
@@ -15,18 +14,19 @@ import icu.xingguangcuican.meowcode.data.oauth.MeowApiClient
 import icu.xingguangcuican.meowcode.data.oauth.MeowOAuthClient
 import icu.xingguangcuican.meowcode.data.oauth.OAuthConfig
 import icu.xingguangcuican.meowcode.data.oauth.OAuthSession
-import icu.xingguangcuican.meowcode.data.oauth.SimulatedOAuthTransport
-import icu.xingguangcuican.meowcode.data.oauth.SimulatedOutcome
-import icu.xingguangcuican.meowcode.data.oauth.UserInfo
+import icu.xingguangcuican.meowcode.data.oauth.UnavailableTransport
+import icu.xingguangcuican.meowcode.data.oauth.isCallbackUri
+import icu.xingguangcuican.meowcode.data.oauth.parseAuthorizationRedirect
 import icu.xingguangcuican.meowcode.data.storage.SessionStore
 import icu.xingguangcuican.meowcode.model.Account
-import icu.xingguangcuican.meowcode.model.AccountSource
 import icu.xingguangcuican.meowcode.model.AppPreferences
 import icu.xingguangcuican.meowcode.model.ApprovalBlock
 import icu.xingguangcuican.meowcode.model.ApprovalState
-import icu.xingguangcuican.meowcode.model.AssistantMessage
 import icu.xingguangcuican.meowcode.model.ChatBlock
-import icu.xingguangcuican.meowcode.model.EnvState
+import icu.xingguangcuican.meowcode.model.EnvironmentItem
+import icu.xingguangcuican.meowcode.model.NoticeTone
+import icu.xingguangcuican.meowcode.model.SessionSummary
+import icu.xingguangcuican.meowcode.model.SystemNotice
 import icu.xingguangcuican.meowcode.model.TerminalCommand
 import icu.xingguangcuican.meowcode.model.ThemeSource
 import icu.xingguangcuican.meowcode.model.ToolCall
@@ -36,7 +36,6 @@ import icu.xingguangcuican.meowcode.model.Workspace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Which destination the shell shows. Constants keep saveable state simple. */
@@ -76,46 +75,41 @@ enum class LoginPhase(val label: String) {
 /**
  * Everything the screens read and mutate. One owner keeps state coherent.
  *
- * Login has two modes: [startLogin] is the real MeowAPI round-trip through
- * [BrowserOAuthTransport], and [startSimulatedLogin] drives the same PKCE contract
- * through [SimulatedOAuthTransport]. The account card labels which one is in force.
+ * There is one login: [startLogin] runs the real MeowAPI PKCE round-trip through
+ * [BrowserOAuthTransport]. Nothing here can fabricate a session.
  */
 @Stable
 class MeowState(
     private val scope: CoroutineScope,
     val oauthConfig: OAuthConfig = OAuthConfig(),
-    val simulatedTransport: SimulatedOAuthTransport = SimulatedOAuthTransport(),
     /** Null in plain-JVM contexts (tests); the browser login then reports itself unavailable. */
     val browserTransport: BrowserOAuthTransport? = null,
     private val store: SessionStore? = null,
 ) {
     var destination by mutableStateOf(Destinations.Chat)
     var preferences by mutableStateOf(AppPreferences())
-    var workspaces by mutableStateOf(MockData.workspaces)
-    var activeWorkspaceId by mutableStateOf("ws-meowcode")
-    val activeWorkspace: Workspace get() = workspaces.firstOrNull { it.id == activeWorkspaceId } ?: workspaces.first()
 
-    var sessions by mutableStateOf(MockData.sessions)
-    var activeSessionId by mutableStateOf("s-1")
+    // ---- Workspaces / sessions ------------------------------------------------
+    // Populated by the agent transport when it lands. The app ships no sample rows,
+    // so every list here starts empty and the screens show an empty state instead.
+    var workspaces by mutableStateOf<List<Workspace>>(emptyList())
+    var activeWorkspaceId by mutableStateOf("")
+    val activeWorkspace: Workspace?
+        get() = workspaces.firstOrNull { it.id == activeWorkspaceId } ?: workspaces.firstOrNull()
+
+    var sessions by mutableStateOf<List<SessionSummary>>(emptyList())
+    var activeSessionId by mutableStateOf("")
 
     // ---- Chat -----------------------------------------------------------------
-    val messages = mutableStateListOf<ChatBlock>().apply { addAll(MockData.conversation) }
+    val messages = mutableStateListOf<ChatBlock>()
     var composerText by mutableStateOf("")
-    var isThinking by mutableStateOf(false)
-    private var replyJob: Job? = null
 
     // ---- Terminal -------------------------------------------------------------
-    val terminal = mutableStateListOf<TerminalCommand>().apply { addAll(MockData.terminalCommands) }
+    val terminal = mutableStateListOf<TerminalCommand>()
     var terminalDraft by mutableStateOf("")
-    var terminalNotice by mutableStateOf<String?>(null)
-
-    // ---- Files ----------------------------------------------------------------
-    var selectedFilePath by mutableStateOf("src/lib/oauth.ts")
-    var fileSearch by mutableStateOf("")
 
     // ---- Environment ----------------------------------------------------------
-    var environment by mutableStateOf(MockData.environment)
-    var checkingEnvironment by mutableStateOf(false)
+    var environment by mutableStateOf<List<EnvironmentItem>>(emptyList())
 
     // ---- MeowAPI keys (apikeys.manage) ----------------------------------------
     var keys by mutableStateOf<List<ApiKey>>(emptyList())
@@ -141,15 +135,13 @@ class MeowState(
         private set
     var pendingAuthorization by mutableStateOf<AuthorizationRequest?>(null)
         private set
-    var simulatedOutcome by mutableStateOf(SimulatedOutcome.Success)
-        private set
     private var loginJob: Job? = null
 
-    private val oauth = MeowOAuthClient(oauthConfig, simulatedTransport)
-    private val api = MeowApiClient(oauthConfig, simulatedTransport)
-
-    /** Mirrors which transport began the login, so the card never calls a real session "模拟". */
-    private var simulatedAccount: AccountSource = AccountSource.Live
+    // Non-null from construction so the clients never need a nullable transport; the
+    // stand-in throws instead of answering, so no session can come out of it.
+    private val transport = browserTransport ?: UnavailableTransport
+    private val oauth = MeowOAuthClient(oauthConfig, transport)
+    private val api = MeowApiClient(oauthConfig, transport)
 
     init {
         // Restore a persisted login before the first frame so the card opens signed in.
@@ -167,54 +159,22 @@ class MeowState(
             session = updated
             store?.writeSession(updated)
         }
-        // The terminal tab opens with one running command; complete it after a beat so
-        // the "进行中" state is visible but not permanent.
-        scope.launch {
-            delay(4_000)
-            val index = terminal.indexOfFirst { it.state == ToolState.Running }
-            if (index >= 0) {
-                val running = terminal[index]
-                terminal[index] = running.copy(
-                    state = ToolState.Succeeded, durationMs = 4_120L, exitCode = 0,
-                    output = running.output + "✓ 会话已就绪（模拟）\n",
-                )
-            }
-        }
     }
 
     // ---- Chat actions ---------------------------------------------------------
 
+    /** No agent transport yet: this reports the truth instead of staging a fake reply. */
     fun sendMessage() {
         val text = composerText.trim()
-        if (text.isEmpty() || isThinking) return
+        if (text.isEmpty()) return
         messages += UserMessage("u-${messages.size}", text, "现在")
         composerText = ""
-        isThinking = true
-        val replyId = "reply-${messages.size}"
-        messages += AssistantMessage(id = replyId, text = "", at = "现在", streaming = true, activity = "正在思考（模拟）")
-        replyJob = scope.launch {
-            delay(700)
-            val chunks = MockData.completionReply.chunked(16)
-            chunks.forEachIndexed { index, chunk ->
-                val position = messages.indexOfFirst { it.id == replyId }
-                if (position >= 0) {
-                    val current = messages[position] as AssistantMessage
-                    messages[position] = current.copy(text = current.text + chunk, streaming = index < chunks.lastIndex)
-                }
-                delay(40)
-            }
-            isThinking = false
-        }
-    }
-
-    fun stopReply() {
-        replyJob?.cancel()
-        val index = messages.indexOfFirst { (it as? AssistantMessage)?.streaming == true }
-        if (index >= 0) {
-            val current = messages[index] as AssistantMessage
-            messages[index] = current.copy(streaming = false, activity = "已停止")
-        }
-        isThinking = false
+        messages += SystemNotice(
+            id = "n-${messages.size}",
+            title = "尚未连接智能体",
+            detail = "消息已保留在本地会话里，但没有发送出去——MeowCode agent 传输层还没有接入。",
+            tone = NoticeTone.Info,
+        )
     }
 
     fun toggleToolCard(id: String) {
@@ -231,29 +191,23 @@ class MeowState(
 
     // ---- Terminal actions -----------------------------------------------------
 
-    /** Runs a command against [MockShell] and appends its card. Never executes anything. */
+    /**
+     * Records the command as a card but runs nothing: there is no PTY or Termux bridge
+     * yet, so the card says so rather than printing invented output.
+     */
     fun submitCommand(raw: String = terminalDraft) {
         val command = raw.trim()
         if (command.isEmpty()) return
         terminalDraft = ""
-        val id = "cmd-${terminal.size}-${command.hashCode()}"
-        val card = TerminalCommand(
-            id = id, command = command, state = ToolState.Running, startedAt = "现在",
-            durationMs = null, exitCode = null, output = "$ mock-shell · 输出为本地模拟\n",
+        terminal += TerminalCommand(
+            id = "cmd-${terminal.size}-${command.hashCode()}",
+            command = command,
+            state = ToolState.Pending,
+            startedAt = "现在",
+            durationMs = null,
+            exitCode = null,
+            output = "未执行：终端桥接尚未接入，命令没有提交到任何进程。\n",
         )
-        terminal += card
-        scope.launch {
-            delay(500)
-            val result = MockShell.simulate(command)
-            val index = terminal.indexOfFirst { it.id == id }
-            if (index >= 0) {
-                terminal[index] = card.copy(
-                    state = if (result.exitCode == 0) ToolState.Succeeded else ToolState.Failed,
-                    exitCode = result.exitCode, durationMs = result.durationMs,
-                    output = card.output + result.output,
-                )
-            }
-        }
     }
 
     fun toggleCommandCard(id: String) {
@@ -265,37 +219,7 @@ class MeowState(
 
     // ---- Files / environment --------------------------------------------------
 
-    fun selectFile(path: String) { selectedFilePath = path }
-
     fun selectWorkspace(id: String) { activeWorkspaceId = id }
-
-    fun checkEnvironment() {
-        if (checkingEnvironment) return
-        checkingEnvironment = true
-        environment = environment.map { it.copy(state = EnvState.Checking) }
-        scope.launch {
-            delay(1_400)
-            environment = MockData.environment
-            checkingEnvironment = false
-        }
-    }
-
-    fun installEnvironmentItem(id: String) {
-        val index = environment.indexOfFirst { it.id == id }
-        if (index < 0) return
-        val item = environment[index]
-        if (item.state == EnvState.Ready) return
-        environment = environment.toMutableList().also { it[index] = item.copy(state = EnvState.Checking, detail = "模拟安装中…") }
-        scope.launch {
-            delay(1_800)
-            val now = environment.indexOfFirst { it.id == id }
-            if (now >= 0) {
-                environment = environment.toMutableList().also {
-                    it[now] = item.copy(state = EnvState.Ready, detail = "模拟完成 · 未修改设备")
-                }
-            }
-        }
-    }
 
     // ---- Preferences ----------------------------------------------------------
 
@@ -315,18 +239,18 @@ class MeowState(
 
     // ---- Login ----------------------------------------------------------------
 
-    fun chooseSimulatedOutcome(outcome: SimulatedOutcome) {
-        simulatedOutcome = outcome
-        simulatedTransport.outcome = outcome
-    }
-
     /**
      * Real login: generate PKCE + state locally, open MeowAPI in the system browser,
      * and let the custom-scheme callback (delivered by `MeowApp`) feed the code back.
-     * The state check and token exchange run in [MeowOAuthClient].
+     * The state check and token exchange run in [MeowOAuthClient]. Whether an incoming
+     * callback belongs to this attempt is decided there by the `state` echo, so a tab
+     * left over from an earlier attempt can neither finish nor kill this login.
      */
     fun startLogin() {
-        if (loginJob?.isActive == true) return
+        // Preparing/Exchanging hold no callback slot, so starting again would strand
+        // the login that is talking to the server. AwaitingBrowser may start again:
+        // that re-opens the tab for the attempt already waiting.
+        if (phase == LoginPhase.Preparing || phase == LoginPhase.Exchanging) return
         val browser = browserTransport
         if (browser == null) {
             fail("当前环境无法打开浏览器")
@@ -335,7 +259,6 @@ class MeowState(
         loginError = null
         oauth.transport = browser
         api.transport = browser
-        simulatedAccount = AccountSource.Live
         phase = LoginPhase.Preparing
         loginJob = scope.launch {
             val request = oauth.beginAuthorization()
@@ -343,7 +266,11 @@ class MeowState(
             phase = LoginPhase.AwaitingBrowser
             val result = browser.authorize(oauthConfig, request.url)
             if (result.error != null) {
-                if (result.error == "cancelled") cancelLogin() else fail(result.errorDescription ?: result.error)
+                when (result.error) {
+                    // A newer attempt (or "取消授权") owns the flow now: leave its UI alone.
+                    "superseded", "cancelled" -> Unit
+                    else -> fail(result.errorDescription ?: result.error)
+                }
                 return@launch
             }
             phase = LoginPhase.Exchanging
@@ -362,52 +289,57 @@ class MeowState(
     }
 
     /**
-     * Offline variant for the stub: a real state nonce, a real verifier/challenge pair,
-     * a real `state` comparison and token parsing — only the browser and HTTP are faked.
+     * Called from the activity when Android delivers the custom-scheme callback.
+     *
+     * Whether a callback belongs to the login in progress is decided by [CallbackSlot]
+     * inside the transport: [BrowserOAuthTransport.deliver] only resumes the attempt
+     * whose `state` the redirect echoes, so a code from a cancelled or otherwise older
+     * tab is dropped here instead of failing or finishing the login that is running.
+     *
+     * One case must not go through the suspended waiter: the activity can be recreated
+     * (Android process death in the background is the common one) since the tab was
+     * opened. Then nothing waits for the callback, but `oauth.inFlight` survives in the
+     * process and carries the verifier the code needs — so it is exchanged directly.
      */
-    fun startSimulatedLogin() {
-        if (loginJob?.isActive == true) return
-        loginError = null
-        oauth.transport = simulatedTransport
-        api.transport = simulatedTransport
-        simulatedAccount = AccountSource.Mock
-        phase = LoginPhase.Preparing
-        loginJob = scope.launch {
-            val request = oauth.beginAuthorization()
-            pendingAuthorization = request
-            phase = LoginPhase.AwaitingBrowser
-            val result = simulatedTransport.authorize(oauthConfig, request.url)
-            if (result.error != null) {
-                fail(result.errorDescription ?: result.error)
-                return@launch
-            }
-            phase = LoginPhase.Exchanging
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { oauth.completeAuthorization(result) }.fold(
-                onSuccess = { created ->
-                    session = created
-                    account = accountFor(created)
-                    phase = LoginPhase.SignedIn
-                    pendingAuthorization = null
-                },
-                onFailure = { error -> fail(oauth.errorMessage(error)) },
-            )
-        }
-    }
-
-    /** Called from the activity when Android delivers the custom-scheme callback. */
     fun handleOAuthCallback(rawUri: String): Boolean {
         val browser = browserTransport ?: return false
-        if (!browser.deliver(rawUri)) return false
-        if (phase == LoginPhase.SignedOut || phase == LoginPhase.Failed) {
-            // Delivered with no pending request (app was killed): nothing to exchange.
-            loginError = "授权回调已收到，但登录状态已丢失，请重新登录"
-            phase = LoginPhase.Failed
+        if (!isCallbackUri(rawUri)) return false
+        val callback = parseAuthorizationRedirect(rawUri)
+        if (browser.deliver(rawUri)) return true
+        val pending = oauth.pendingRequest()
+        if (pending != null && callback.state == pending.state) {
+            loginJob = scope.launch {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { oauth.completeAuthorization(callback) }.fold(
+                    onSuccess = { created ->
+                        session = created
+                        account = accountFor(created)
+                        phase = LoginPhase.SignedIn
+                        pendingAuthorization = null
+                        refreshAccountDetails()
+                        loadKeys()
+                    },
+                    onFailure = { error -> fail(oauth.errorMessage(error)) },
+                )
+            }
+            return true
         }
+        if (callback.error != null || callback.code == null) {
+            loginError = callback.errorDescription ?: callback.error
+            phase = LoginPhase.Failed
+            return true
+        }
+        // A code arrived for a request this process no longer holds (it was killed with
+        // the browser in front, or the tab outlived the 10-minute wait). The verifier
+        // died with it, so this code cannot be exchanged and the user has to approve
+        // once more — say exactly that.
+        loginError = "授权回调已收到，但登录状态已丢失，请重新登录"
+        phase = LoginPhase.Failed
         return true
     }
 
     fun cancelLogin() {
         loginJob?.cancel()
+        loginJob = null
         oauth.cancel()
         pendingAuthorization = null
         if (phase != LoginPhase.SignedIn) phase = LoginPhase.SignedOut
@@ -525,7 +457,6 @@ class MeowState(
         issuer = created.issuer,
         scope = created.scope,
         tokenExpiresAt = expiryLabel(created),
-        source = simulatedAccount,
     )
 
 
@@ -537,41 +468,12 @@ class MeowState(
 
     private fun fail(message: String?) {
         oauth.cancel()
+        loginJob = null
         pendingAuthorization = null
         loginError = message ?: "登录失败"
-        phase = LoginPhase.Failed
-    }
-}
-
-/** Deliberately tiny shell used by the terminal stub. */
-object MockShell {
-    data class Output(val exitCode: Int, val durationMs: Long, val output: String)
-
-    fun simulate(command: String): Output {
-        val normalized = command.trim()
-        return when {
-            normalized.startsWith("git status") ->
-                Output(0, 310L, " M src/lib/oauth.ts\n?? src/lib/oauth.refresh.test.ts\n")
-            normalized.startsWith("git diff") ->
-                Output(0, 420L, "diff --git a/src/lib/oauth.ts b/src/lib/oauth.ts\n" +
-                    "   const cur = loadCredentials()\n+  if (!cur?.oauth?.refreshToken) return undefined\n" +
-                    "+  // 旋转后立即落盘，避免重试时重放旧 token\n")
-            normalized.startsWith("npm run typecheck") ->
-                Output(0, 7_600L, "> meowcode@0.4.2 typecheck\n> tsc --noEmit\n\n✓ 无类型错误（模拟输出）\n")
-            normalized.startsWith("npm test") || normalized.startsWith("npm run test") ->
-                Output(0, 2_100L, "✓ oauth.test.ts (13 tests, 模拟输出)\n")
-            normalized.startsWith("npm") ->
-                Output(0, 1_100L, "> meowcode@0.4.2\n模拟执行完成，未真正运行 npm。\n")
-            normalized.startsWith("ls") ->
-                Output(0, 60L, "MEOWCODE.md\npackage.json\nsrc\n")
-            normalized.startsWith("pwd") ->
-                Output(0, 40L, "/home/meowcode\n")
-            normalized == "help" ->
-                Output(0, 10L, "演示命令：git status / git diff / npm run typecheck / npm test / ls / pwd / help\n" +
-                    "其他命令返回退出码 127。\n")
-            else ->
-                Output(127, 25L, "$normalized: command not found（模拟环境不执行真实命令）\n")
-        }
+        // A login that already succeeded is never undone by a late attempt's failure.
+        // (Its UI is the signed-in card, which would otherwise turn into the error card.)
+        if (phase != LoginPhase.SignedIn) phase = LoginPhase.Failed
     }
 }
 
